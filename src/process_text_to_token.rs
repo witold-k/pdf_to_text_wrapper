@@ -3,7 +3,7 @@
 
 use crate::error::{Error, Result};
 use simplelexer::chunkkind::ChunkKind;
-use simplelexer::quotelexer::QuoteLexer;
+use simplelexer::tokenlexer::TokenLexer;
 use std::fs;
 use std::path::Path;
 use token_db::{TokenDb, TokenId};
@@ -20,7 +20,7 @@ pub fn load_token_stream(path: &Path) -> Result<Vec<TokenId>> {
 }
 
 pub fn tokenize(db: &mut TokenDb, text: &str) -> Result<Vec<TokenId>> {
-    let lexer = QuoteLexer::new(text);
+    let lexer = TokenLexer::new(text);
 
     lexer
         .lex()?

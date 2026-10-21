@@ -11,7 +11,7 @@ serde_json = "1"
 
 # -- converters --------------------------------------------------------------
 roxmltree = "0.21"
-simplelexer = { version = "0.1.0", git = "https://github.com/witold-k/simplelexer", rev = "9b04c15e393feac77c621dd72b35bc74607054a9" }
+simplelexer = { version = "0.1.0", git = "https://github.com/witold-k/simplelexer", rev = "1da9e4e432b803ca71e1053ec213231b94057b72" }
 
 # -- fsscan ------------------------------------------------------------------
 fsscanner = { version = "0.4.0", git = "https://github.com/witold-k/fsscanner", rev = "cb034d15865d20b5102c6ec5a12f8944e2e11058" }
