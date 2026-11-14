@@ -3,7 +3,10 @@
 
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
-use std::{env, fs, path::{Path, PathBuf}};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+};
 
 use crate::process_pdf_to_text::PdfBackend;
 
@@ -84,7 +87,10 @@ impl Config {
         let name = path.file_name().and_then(|s| s.to_str());
         name.is_some_and(|name| {
             self.scanendfilter.iter().any(|suffix| {
-                !suffix.is_empty() && name.to_ascii_lowercase().ends_with(&suffix.to_ascii_lowercase())
+                !suffix.is_empty()
+                    && name
+                        .to_ascii_lowercase()
+                        .ends_with(&suffix.to_ascii_lowercase())
             })
         })
     }
@@ -95,10 +101,18 @@ impl Config {
         let mut extensions = Vec::new();
         for suffix in &self.scanendfilter {
             let Some(extension) = suffix.strip_prefix('.') else {
-                return Err(crate::error::Error::InvalidPath("scanendfilter entries must start with '.'"));
+                return Err(crate::error::Error::InvalidPath(
+                    "scanendfilter entries must start with '.'",
+                ));
             };
-            if extension.is_empty() || extension.contains('.') || extension.contains('/') || extension.contains('\\') {
-                return Err(crate::error::Error::InvalidPath("scanendfilter must contain simple file extensions"));
+            if extension.is_empty()
+                || extension.contains('.')
+                || extension.contains('/')
+                || extension.contains('\\')
+            {
+                return Err(crate::error::Error::InvalidPath(
+                    "scanendfilter must contain simple file extensions",
+                ));
             }
             let extension = extension.to_ascii_lowercase();
             if !extensions.contains(&extension) {
@@ -106,7 +120,9 @@ impl Config {
             }
         }
         if extensions.is_empty() {
-            return Err(crate::error::Error::InvalidPath("scanendfilter must not be empty"));
+            return Err(crate::error::Error::InvalidPath(
+                "scanendfilter must not be empty",
+            ));
         }
         Ok(extensions)
     }

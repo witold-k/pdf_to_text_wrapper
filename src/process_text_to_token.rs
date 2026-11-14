@@ -31,11 +31,7 @@ pub fn tokenize(db: &mut TokenDb, text: &str) -> Result<Vec<TokenId>> {
 }
 
 /// Tokenizes one UTF-8 text file into a token stream and its document-local database.
-pub fn process_text_to_token(
-    input: &Path,
-    token_output: &Path,
-    db_output: &Path,
-) -> Result<()> {
+pub fn process_text_to_token(input: &Path, token_output: &Path, db_output: &Path) -> Result<()> {
     println!(
         "text -> token: {} -> {}, {}",
         input.display(),

@@ -5,7 +5,7 @@
 
 use crate::config::Config;
 use crate::error::{Error, Result};
-use crate::process_pdf_to_text::{process_pdf_to_text, PdfBackend};
+use crate::process_pdf_to_text::{PdfBackend, process_pdf_to_text};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -24,7 +24,9 @@ pub fn mapped_output(input: &Path, mapped: &Path, suffix: &str) -> Result<PathBu
 }
 
 fn is_pdf(input: &Path) -> bool {
-    input.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
+    input
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("pdf"))
 }
 
 /// PDF uses the configured extractor; DOCX uses OOXML; any other configured
@@ -38,7 +40,10 @@ pub fn process_source_to_text(
     if is_pdf(input) {
         return process_pdf_to_text(config, backend, input, output);
     }
-    let text = if input.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("docx")) {
+    let text = if input
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("docx"))
+    {
         docx_text(input)?
     } else {
         fs::read_to_string(input)?
@@ -59,14 +64,19 @@ fn docx_text(input: &Path) -> Result<String> {
         .arg("word/document.xml")
         .output()?;
     if !result.status.success() {
-        return Err(Error::InvalidPath("could not extract word/document.xml from DOCX"));
+        return Err(Error::InvalidPath(
+            "could not extract word/document.xml from DOCX",
+        ));
     }
     let xml = String::from_utf8(result.stdout)
         .map_err(|_| Error::InvalidPath("DOCX document.xml is not UTF-8"))?;
     let document = roxmltree::Document::parse(&xml)?;
     let ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main";
     let mut text = String::new();
-    for paragraph in document.descendants().filter(|node| node.has_tag_name((ns, "p"))) {
+    for paragraph in document
+        .descendants()
+        .filter(|node| node.has_tag_name((ns, "p")))
+    {
         for node in paragraph.descendants().filter(|node| node.is_element()) {
             if node.has_tag_name((ns, "t")) {
                 if let Some(value) = node.text() {
@@ -90,11 +100,17 @@ pub fn single_file_outputs(
     output_root: &Path,
 ) -> Result<(PathBuf, PathBuf, PathBuf)> {
     if !input.is_file() || !config.accepts(input) {
-        return Err(Error::InvalidPath("single-file input must match scanendfilter"));
+        return Err(Error::InvalidPath(
+            "single-file input must match scanendfilter",
+        ));
     }
     let stem = input
         .file_stem()
         .ok_or(Error::InvalidPath("input source has no file stem"))?;
     let text = mapped_output(input, &output_root.join(stem).with_extension("md"), "md")?;
-    Ok((text.clone(), text.with_extension("tok"), text.with_extension("tdb")))
+    Ok((
+        text.clone(),
+        text.with_extension("tok"),
+        text.with_extension("tdb"),
+    ))
 }

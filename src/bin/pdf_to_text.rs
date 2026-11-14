@@ -3,12 +3,14 @@
 
 use fsscanner::fsscanner_mt;
 use pdf_to_text_wrapper::config::Config;
+use pdf_to_text_wrapper::error::{Error, Result};
 use pdf_to_text_wrapper::process_pdf_to_text::PdfBackend;
-use pdf_to_text_wrapper::process_source::{mapped_output, process_source_to_text, single_file_outputs};
+use pdf_to_text_wrapper::process_source::{
+    mapped_output, process_source_to_text, single_file_outputs,
+};
 use pdf_to_text_wrapper::process_text_to_token::{
     process_join_token, process_text_to_token, process_token_to_global,
 };
-use pdf_to_text_wrapper::error::{Error, Result};
 use pdf_to_text_wrapper::service::start_service;
 use std::path::{Path, PathBuf};
 use token_db::TokenDb;
@@ -76,7 +78,9 @@ fn main() -> Result<()> {
 
     let single_file = Path::new(source_input).is_file();
     if !single_file && !Path::new(source_input).is_dir() {
-        return Err(Error::InvalidPath("input must be an existing file or directory"));
+        return Err(Error::InvalidPath(
+            "input must be an existing file or directory",
+        ));
     }
     let extensions = config.scan_extensions()?;
 
@@ -85,7 +89,12 @@ fn main() -> Result<()> {
     //
 
     if single_file {
-        process_single_file(&config, backend, Path::new(source_input), Path::new(output_root))?;
+        process_single_file(
+            &config,
+            backend,
+            Path::new(source_input),
+            Path::new(output_root),
+        )?;
     } else {
         let workers = match backend {
             PdfBackend::Grobid => config.grobid.threads,
@@ -107,7 +116,9 @@ fn main() -> Result<()> {
                         .map_err(|_| fsscanner::Error::Callback("invalid document output path"))?;
                     if fsscanner_mt::needs_update(input, &text_output)? {
                         process_source_to_text(&worker_config, backend, input, &text_output)
-                            .map_err(|_| fsscanner::Error::Callback("document conversion failed"))?;
+                            .map_err(|_| {
+                                fsscanner::Error::Callback("document conversion failed")
+                            })?;
                     }
                     Ok(())
                 },
@@ -180,41 +191,33 @@ fn main() -> Result<()> {
     //
 
     let global_db = TokenDb::load(&token_db_output)?;
-    fsscanner_mt::process_dir_map_with_workers(
-        output_root,
-        output_root,
-        "tdb",
-        "unused",
-        1,
-        {
-            let token_db_output = token_db_output.clone();
-            move |local_db_input, _| {
-                if local_db_input == token_db_output {
-                    return Ok(());
-                }
-
-                let token_input = local_db_input.with_extension("tok");
-                let stem = local_db_input
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .ok_or(fsscanner::Error::Callback("invalid token database path"))?;
-                let global_token_output = local_db_input.with_file_name(format!("{stem}_glob.tok"));
-
-                if fsscanner_mt::needs_update(&token_db_output, &global_token_output)? {
-                    process_token_to_global(
-                        &token_input,
-                        local_db_input,
-                        &global_db,
-                        &global_token_output,
-                    )
-                    .map_err(|_| fsscanner::Error::Callback("global token remap failed"))?;
-                }
-                Ok(())
+    fsscanner_mt::process_dir_map_with_workers(output_root, output_root, "tdb", "unused", 1, {
+        let token_db_output = token_db_output.clone();
+        move |local_db_input, _| {
+            if local_db_input == token_db_output {
+                return Ok(());
             }
-        },
-    )
+
+            let token_input = local_db_input.with_extension("tok");
+            let stem = local_db_input
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .ok_or(fsscanner::Error::Callback("invalid token database path"))?;
+            let global_token_output = local_db_input.with_file_name(format!("{stem}_glob.tok"));
+
+            if fsscanner_mt::needs_update(&token_db_output, &global_token_output)? {
+                process_token_to_global(
+                    &token_input,
+                    local_db_input,
+                    &global_db,
+                    &global_token_output,
+                )
+                .map_err(|_| fsscanner::Error::Callback("global token remap failed"))?;
+            }
+            Ok(())
+        }
+    })
     .map_err(|_| Error::FsScanner)?;
 
     Ok(())
 }
-

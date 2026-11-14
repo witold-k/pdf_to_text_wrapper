@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright (c) 2026 Witold Kaminski
 
-use crate::error::{Error, Result};
 use crate::config::Config;
+use crate::error::{Error, Result};
 use crate::pdf2json::GrobidConverter;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -95,8 +95,12 @@ fn process_grobid(config: &Config, input: &Path, output: &Path) -> Result<()> {
 }
 
 fn output_directory(output: &Path) -> Result<PathBuf> {
-    let parent = output.parent().ok_or(Error::InvalidPath("output path has no parent"))?;
-    let stem = output.file_stem().ok_or(Error::InvalidPath("output path has no file stem"))?;
+    let parent = output
+        .parent()
+        .ok_or(Error::InvalidPath("output path has no parent"))?;
+    let stem = output
+        .file_stem()
+        .ok_or(Error::InvalidPath("output path has no file stem"))?;
     Ok(parent.join(stem))
 }
 
@@ -124,7 +128,9 @@ fn create_primary_link(link: &Path, target: &Path) -> Result<()> {
         fs::remove_file(link)?;
     }
 
-    let parent = link.parent().ok_or(Error::InvalidPath("link path has no parent"))?;
+    let parent = link
+        .parent()
+        .ok_or(Error::InvalidPath("link path has no parent"))?;
     let relative_target = target
         .strip_prefix(parent)
         .map_err(|_| Error::InvalidPath("link target is outside link parent"))?;
