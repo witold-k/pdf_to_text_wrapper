@@ -83,7 +83,6 @@ fn docx_text(input: &Path) -> Result<String> {
     Ok(text)
 }
 
-
 /// Resolve canonical output paths for one configured input file.
 pub fn single_file_outputs(
     config: &Config,
