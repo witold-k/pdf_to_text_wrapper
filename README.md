@@ -192,6 +192,21 @@ pdf_to_text mineru <pdf_input_dir> <output_dir>
 pdf_to_text grobid <pdf_input_dir> <output_dir>
 ```
 
+You can also process a single PDF without scanning its containing directory:
+
+```sh
+pdf_to_text /path/to/document.pdf /path/to/output
+pdf_to_text mineru /path/to/document.pdf /path/to/output
+```
+
+The single-file mode writes the same per-document artifacts as directory mode
+(`document.md`, `document.tok`, `document.tdb`, and `document_glob.tok`) under
+the output directory. The existing corpus-level `token_db.tdb` is also updated
+and global token IDs remapped as needed. Other PDFs in the input directory are
+not scanned, while any already-existing local token databases in the output
+directory remain part of its corpus merge. An existing PDF or an existing
+input directory is required; files must have a `.pdf` extension (case-insensitive).
+
 Backend services can be started with:
 
 ```sh
