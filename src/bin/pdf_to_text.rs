@@ -4,7 +4,7 @@
 use fsscanner::fsscanner_mt;
 use pdf_to_text_wrapper::config::Config;
 use pdf_to_text_wrapper::process_pdf_to_text::PdfBackend;
-use pdf_to_text_wrapper::process_source::{mapped_output, process_source_to_text};
+use pdf_to_text_wrapper::process_source::{mapped_output, process_source_to_text, single_file_outputs};
 use pdf_to_text_wrapper::process_text_to_token::{
     process_join_token, process_text_to_token, process_token_to_global,
 };
@@ -17,18 +17,6 @@ fn usage() {
     eprintln!("Usage:");
     eprintln!("  pdf_to_text [grobid|mineru] <input_dir|input_file> <output_dir>");
     eprintln!("  pdf_to_text start [grobid|mineru]");
-}
-
-/// Resolve canonical output paths for one configured source file.
-fn single_file_outputs(config: &Config, input: &Path, output_root: &Path) -> Result<(PathBuf, PathBuf, PathBuf)> {
-    if !input.is_file() || !config.accepts(input) {
-        return Err(Error::InvalidPath("single-file input must match scanendfilter"));
-    }
-    let stem = input
-        .file_stem()
-        .ok_or(Error::InvalidPath("input source has no file stem"))?;
-    let text = mapped_output(input, &output_root.join(stem).with_extension("md"), "md")?;
-    Ok((text.clone(), text.with_extension("tok"), text.with_extension("tdb")))
 }
 
 /// Process one file without scanning other input files. The token database
@@ -230,34 +218,3 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::single_file_outputs;
-    use pdf_to_text_wrapper::config::Config;
-    use std::path::Path;
-
-    #[test]
-    fn configured_formats_map_to_same_output_layout() {
-        let config = Config::default();
-        let dir = std::env::temp_dir();
-        for extension in ["pdf", "docx", "txt"] {
-            let input = dir.join(format!(
-                "pdf_to_text_single_input_{}_{}.{}",
-                std::process::id(), line!(), extension
-            ));
-            std::fs::write(&input, b"dummy").unwrap();
-            let out = dir.join("test_output");
-            let (md, tok, tdb) = single_file_outputs(&config, &input, &out).unwrap();
-            assert_eq!(md.file_name().unwrap(), input.with_extension("md").file_name().unwrap());
-            assert_eq!(tok.file_name().unwrap(), input.with_extension("tok").file_name().unwrap());
-            assert_eq!(tdb.file_name().unwrap(), input.with_extension("tdb").file_name().unwrap());
-            std::fs::remove_file(input).unwrap();
-        }
-    }
-
-    #[test]
-    fn single_file_rejects_unconfigured_suffix() {
-        let config = Config::default();
-        assert!(single_file_outputs(&config, Path::new("/not-a-doc.xml"), Path::new("/tmp")).is_err());
-    }
-}
