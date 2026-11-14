@@ -62,9 +62,9 @@ fn single_file_rejects_unconfigured_suffix() {
 }
 
 #[test]
-fn suffixes_default_for_legacy_config() {
+fn missing_suffixes_are_rejected() {
     let mut value = serde_json::to_value(Config::default()).unwrap();
     value.as_object_mut().unwrap().remove("scanendfilter");
-    let restored: Config = serde_json::from_value(value).unwrap();
-    assert_eq!(restored.scanendfilter, vec![".pdf", ".docx"]);
+    let error = serde_json::from_value::<Config>(value).unwrap_err();
+    assert!(error.to_string().contains("missing field `scanendfilter`"));
 }
