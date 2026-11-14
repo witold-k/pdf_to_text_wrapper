@@ -14,14 +14,14 @@ use token_db::TokenDb;
 
 fn usage() {
     eprintln!("Usage:");
-    eprintln!("  pdf_to_text [grobid|mineru] <pdf_input_dir|pdf_file> <output_dir>");
+    eprintln!("  pdf_to_text [grobid|mineru] <input_dir|input_file> <output_dir>");
     eprintln!("  pdf_to_text start [grobid|mineru]");
 }
 
-/// Resolve the canonical output paths for a single input PDF.
-fn single_pdf_outputs(input: &Path, output_root: &Path) -> Result<(PathBuf, PathBuf, PathBuf)> {
-    if !input.is_file() || !input.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("pdf")) {
-        return Err(Error::InvalidPath("single-file input must be an existing PDF"));
+/// Resolve canonical output paths for one configured source file.
+fn single_file_outputs(config: &Config, input: &Path, output_root: &Path) -> Result<(PathBuf, PathBuf, PathBuf)> {
+    if !input.is_file() || !config.accepts(input) {
+        return Err(Error::InvalidPath("single-file input must match scanendfilter"));
     }
     let stem = input
         .file_stem()
@@ -30,15 +30,15 @@ fn single_pdf_outputs(input: &Path, output_root: &Path) -> Result<(PathBuf, Path
     Ok((base.with_extension("md"), base.with_extension("tok"), base.with_extension("tdb")))
 }
 
-/// Process one PDF without scanning other input files. The token database
+/// Process one file without scanning other input files. The token database
 /// merge and global remapping stages remain shared with directory mode.
-fn process_single_pdf(
+fn process_single_file(
     config: &Config,
     backend: PdfBackend,
     input: &Path,
     output_root: &Path,
 ) -> Result<()> {
-    let (text_output, token_output, db_output) = single_pdf_outputs(input, output_root)?;
+    let (text_output, token_output, db_output) = single_file_outputs(config, input, output_root)?;
     std::fs::create_dir_all(output_root)?;
     if fsscanner_mt::needs_update(input, &text_output).map_err(|_| Error::FsScanner)? {
         process_pdf_to_text(config, backend, input, &text_output)?;
@@ -79,66 +79,72 @@ fn main() -> Result<()> {
         std::process::exit(1);
     }
 
-    let (backend, pdf_input, output_root) = if args.len() == 4 {
+    let (backend, source_input, output_root) = if args.len() == 4 {
         (args[1].parse::<PdfBackend>()?, &args[2], &args[3])
     } else {
         (config.backend, &args[1], &args[2])
     };
 
-    let single_file = Path::new(pdf_input).is_file();
-    if !single_file && !Path::new(pdf_input).is_dir() {
-        return Err(Error::InvalidPath("input must be an existing PDF or directory"));
+    let single_file = Path::new(source_input).is_file();
+    if !single_file && !Path::new(source_input).is_dir() {
+        return Err(Error::InvalidPath("input must be an existing file or directory"));
     }
+    let extensions = config.scan_extensions()?;
 
     //
     // Stage 1: PDF -> text
     //
 
     if single_file {
-        process_single_pdf(&config, backend, Path::new(pdf_input), Path::new(output_root))?;
+        process_single_file(&config, backend, Path::new(source_input), Path::new(output_root))?;
     } else {
         let workers = match backend {
             PdfBackend::Grobid => config.grobid.threads,
             PdfBackend::Mineru => config.mineru.threads,
         };
 
-        let worker_config = config.clone();
-        fsscanner_mt::process_dir_map_outdated_with_workers(
-            pdf_input,
-            output_root,
-            "pdf",
-            "md",
-            workers,
-            move |input, output| {
-                process_pdf_to_text(&worker_config, backend, input, output)
-                    .map_err(|_| fsscanner::Error::Callback("PDF conversion failed"))
-            },
-        )
-        .map_err(|_| Error::FsScanner)?;
+        // fsscanner maps one extension at a time. Reuse it for every configured
+        // suffix rather than adding a separate directory walker or worker pool.
+        for extension in &extensions {
+            let worker_config = config.clone();
+            fsscanner_mt::process_dir_map_outdated_with_workers(
+                source_input,
+                output_root,
+                extension,
+                "md",
+                workers,
+                move |input, output| {
+                    process_pdf_to_text(&worker_config, backend, input, output)
+                        .map_err(|_| fsscanner::Error::Callback("document conversion failed"))
+                },
+            )
+            .map_err(|_| Error::FsScanner)?;
+        }
 
         //
         // Stage 2: text -> per-document token stream + lookup database
         //
-
-        fsscanner_mt::process_dir_map_with_workers(
-            pdf_input,
-            output_root,
-            "pdf",
-            "tok",
-            1,
-            move |_pdf, token_output| {
-                let text_input = token_output.with_extension("md");
-                let db_output = token_output.with_extension("tdb");
-                if fsscanner_mt::needs_update(&text_input, token_output)?
-                    || fsscanner_mt::needs_update(&text_input, &db_output)?
-                {
-                    process_text_to_token(&text_input, token_output, &db_output)
-                        .map_err(|_| fsscanner::Error::Callback("token conversion failed"))?;
-                }
-                Ok(())
-            },
-        )
-        .map_err(|_| Error::FsScanner)?;
+        for extension in &extensions {
+            fsscanner_mt::process_dir_map_with_workers(
+                source_input,
+                output_root,
+                extension,
+                "tok",
+                1,
+                move |_source, token_output| {
+                    let text_input = token_output.with_extension("md");
+                    let db_output = token_output.with_extension("tdb");
+                    if fsscanner_mt::needs_update(&text_input, token_output)?
+                        || fsscanner_mt::needs_update(&text_input, &db_output)?
+                    {
+                        process_text_to_token(&text_input, token_output, &db_output)
+                            .map_err(|_| fsscanner::Error::Callback("token conversion failed"))?;
+                    }
+                    Ok(())
+                },
+            )
+            .map_err(|_| Error::FsScanner)?;
+        }
     }
 
     //
@@ -218,25 +224,32 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::single_pdf_outputs;
+    use super::single_file_outputs;
+    use pdf_to_text_wrapper::config::Config;
     use std::path::Path;
 
     #[test]
-    fn single_pdf_maps_to_normal_output_layout() {
+    fn configured_formats_map_to_same_output_layout() {
+        let config = Config::default();
         let dir = std::env::temp_dir();
-        let name = format!("pdf_to_text_single_input_{}_{}.pdf", std::process::id(), line!());
-        let input = dir.join(name);
-        std::fs::write(&input, b"%PDF-1.4").unwrap();
-        let out = dir.join("test_output");
-        let (md, tok, tdb) = single_pdf_outputs(&input, &out).unwrap();
-        assert_eq!(md.file_name().unwrap(), input.with_extension("md").file_name().unwrap());
-        assert_eq!(tok.file_name().unwrap(), input.with_extension("tok").file_name().unwrap());
-        assert_eq!(tdb.file_name().unwrap(), input.with_extension("tdb").file_name().unwrap());
-        std::fs::remove_file(input).unwrap();
+        for extension in ["pdf", "docx"] {
+            let input = dir.join(format!(
+                "pdf_to_text_single_input_{}_{}.{}",
+                std::process::id(), line!(), extension
+            ));
+            std::fs::write(&input, b"dummy").unwrap();
+            let out = dir.join("test_output");
+            let (md, tok, tdb) = single_file_outputs(&config, &input, &out).unwrap();
+            assert_eq!(md.file_name().unwrap(), input.with_extension("md").file_name().unwrap());
+            assert_eq!(tok.file_name().unwrap(), input.with_extension("tok").file_name().unwrap());
+            assert_eq!(tdb.file_name().unwrap(), input.with_extension("tdb").file_name().unwrap());
+            std::fs::remove_file(input).unwrap();
+        }
     }
 
     #[test]
-    fn single_pdf_rejects_non_pdf() {
-        assert!(single_pdf_outputs(Path::new("/not-a-pdf.txt"), Path::new("/tmp")).is_err());
+    fn single_file_rejects_unconfigured_suffix() {
+        let config = Config::default();
+        assert!(single_file_outputs(&config, Path::new("/not-a-pdf.txt"), Path::new("/tmp")).is_err());
     }
 }
