@@ -28,9 +28,10 @@ pub struct MineruConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
 pub struct Config {
     /// Filename suffixes accepted by source scanning (as in aiagents).
-    #[serde(default = "default_scanendfilter")]
+    /// Missing fields in older config files are filled using Config::default().
     pub scanendfilter: Vec<String>,
     pub backend: PdfBackend,
     pub grobid: GrobidConfig,
