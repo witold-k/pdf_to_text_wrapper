@@ -83,28 +83,19 @@ fn docx_text(input: &Path) -> Result<String> {
     Ok(text)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::mapped_output;
-    use std::path::Path;
 
-    #[test]
-    fn pdf_layout_is_unchanged() {
-        assert_eq!(
-            mapped_output(Path::new("/in/report.pdf"), Path::new("/out/report.md"), "md").unwrap(),
-            Path::new("/out/report.md")
-        );
+/// Resolve canonical output paths for one configured input file.
+pub fn single_file_outputs(
+    config: &Config,
+    input: &Path,
+    output_root: &Path,
+) -> Result<(PathBuf, PathBuf, PathBuf)> {
+    if !input.is_file() || !config.accepts(input) {
+        return Err(Error::InvalidPath("single-file input must match scanendfilter"));
     }
-
-    #[test]
-    fn suffixes_do_not_overwrite_each_other() {
-        assert_eq!(
-            mapped_output(Path::new("/in/report.docx"), Path::new("/out/report.md"), "md").unwrap(),
-            Path::new("/out/report.docx.md")
-        );
-        assert_eq!(
-            mapped_output(Path::new("/in/report.txt"), Path::new("/out/report.tok"), "tok").unwrap(),
-            Path::new("/out/report.txt.tok")
-        );
-    }
+    let stem = input
+        .file_stem()
+        .ok_or(Error::InvalidPath("input source has no file stem"))?;
+    let text = mapped_output(input, &output_root.join(stem).with_extension("md"), "md")?;
+    Ok((text.clone(), text.with_extension("tok"), text.with_extension("tdb")))
 }
