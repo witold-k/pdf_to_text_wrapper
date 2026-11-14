@@ -3,7 +3,8 @@
 
 use fsscanner::fsscanner_mt;
 use pdf_to_text_wrapper::config::Config;
-use pdf_to_text_wrapper::process_pdf_to_text::{process_pdf_to_text, PdfBackend};
+use pdf_to_text_wrapper::process_pdf_to_text::PdfBackend;
+use pdf_to_text_wrapper::process_source::{mapped_output, process_source_to_text};
 use pdf_to_text_wrapper::process_text_to_token::{
     process_join_token, process_text_to_token, process_token_to_global,
 };
@@ -25,9 +26,9 @@ fn single_file_outputs(config: &Config, input: &Path, output_root: &Path) -> Res
     }
     let stem = input
         .file_stem()
-        .ok_or(Error::InvalidPath("input PDF has no file stem"))?;
-    let base = output_root.join(stem);
-    Ok((base.with_extension("md"), base.with_extension("tok"), base.with_extension("tdb")))
+        .ok_or(Error::InvalidPath("input source has no file stem"))?;
+    let text = mapped_output(input, &output_root.join(stem).with_extension("md"), "md")?;
+    Ok((text.clone(), text.with_extension("tok"), text.with_extension("tdb")))
 }
 
 /// Process one file without scanning other input files. The token database
@@ -41,7 +42,7 @@ fn process_single_file(
     let (text_output, token_output, db_output) = single_file_outputs(config, input, output_root)?;
     std::fs::create_dir_all(output_root)?;
     if fsscanner_mt::needs_update(input, &text_output).map_err(|_| Error::FsScanner)? {
-        process_pdf_to_text(config, backend, input, &text_output)?;
+        process_source_to_text(config, backend, input, &text_output)?;
     }
     if fsscanner_mt::needs_update(&text_output, &token_output).map_err(|_| Error::FsScanner)?
         || fsscanner_mt::needs_update(&text_output, &db_output).map_err(|_| Error::FsScanner)?
@@ -92,7 +93,7 @@ fn main() -> Result<()> {
     let extensions = config.scan_extensions()?;
 
     //
-    // Stage 1: PDF -> text
+    // Stage 1: configured source -> text
     //
 
     if single_file {
@@ -107,15 +108,20 @@ fn main() -> Result<()> {
         // suffix rather than adding a separate directory walker or worker pool.
         for extension in &extensions {
             let worker_config = config.clone();
-            fsscanner_mt::process_dir_map_outdated_with_workers(
+            fsscanner_mt::process_dir_map_with_workers(
                 source_input,
                 output_root,
                 extension,
                 "md",
                 workers,
                 move |input, output| {
-                    process_pdf_to_text(&worker_config, backend, input, output)
-                        .map_err(|_| fsscanner::Error::Callback("document conversion failed"))
+                    let text_output = mapped_output(input, output, "md")
+                        .map_err(|_| fsscanner::Error::Callback("invalid document output path"))?;
+                    if fsscanner_mt::needs_update(input, &text_output)? {
+                        process_source_to_text(&worker_config, backend, input, &text_output)
+                            .map_err(|_| fsscanner::Error::Callback("document conversion failed"))?;
+                    }
+                    Ok(())
                 },
             )
             .map_err(|_| Error::FsScanner)?;
@@ -131,13 +137,15 @@ fn main() -> Result<()> {
                 extension,
                 "tok",
                 1,
-                move |_source, token_output| {
+                move |source, mapped_token_output| {
+                    let token_output = mapped_output(source, mapped_token_output, "tok")
+                        .map_err(|_| fsscanner::Error::Callback("invalid token output path"))?;
                     let text_input = token_output.with_extension("md");
                     let db_output = token_output.with_extension("tdb");
-                    if fsscanner_mt::needs_update(&text_input, token_output)?
+                    if fsscanner_mt::needs_update(&text_input, &token_output)?
                         || fsscanner_mt::needs_update(&text_input, &db_output)?
                     {
-                        process_text_to_token(&text_input, token_output, &db_output)
+                        process_text_to_token(&text_input, &token_output, &db_output)
                             .map_err(|_| fsscanner::Error::Callback("token conversion failed"))?;
                     }
                     Ok(())
@@ -232,7 +240,7 @@ mod tests {
     fn configured_formats_map_to_same_output_layout() {
         let config = Config::default();
         let dir = std::env::temp_dir();
-        for extension in ["pdf", "docx"] {
+        for extension in ["pdf", "docx", "txt"] {
             let input = dir.join(format!(
                 "pdf_to_text_single_input_{}_{}.{}",
                 std::process::id(), line!(), extension
@@ -250,6 +258,6 @@ mod tests {
     #[test]
     fn single_file_rejects_unconfigured_suffix() {
         let config = Config::default();
-        assert!(single_file_outputs(&config, Path::new("/not-a-pdf.txt"), Path::new("/tmp")).is_err());
+        assert!(single_file_outputs(&config, Path::new("/not-a-doc.xml"), Path::new("/tmp")).is_err());
     }
 }
