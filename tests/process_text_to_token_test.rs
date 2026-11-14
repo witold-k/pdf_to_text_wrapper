@@ -67,11 +67,13 @@ fn process_writes_separate_token_stream_and_lookup_database() {
 }
 
 #[test]
-fn rejects_malformed_quoted_input() {
+fn tokenizes_unmatched_quotes_as_ordinary_tokens() {
     let mut db = TokenDb::new();
-    let error = tokenize(&mut db, "NAME = \"unterminated").unwrap_err();
+    let tokens = tokenize(&mut db, "NAME = \"unterminated").unwrap();
 
-    assert!(error.to_string().contains("unterminated quoted string"));
+    assert_eq!(tokens.len(), 4);
+    assert!(db.id("\"").is_some());
+    assert!(db.id("unterminated").is_some());
 }
 
 #[test]
