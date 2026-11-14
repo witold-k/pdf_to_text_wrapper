@@ -3,19 +3,43 @@
 
 use fsscanner::fsscanner_mt;
 use pdf_to_text_wrapper::config::Config;
-use pdf_to_text_wrapper::process_pdf_to_text::{process_pdf_to_text, PdfBackend};
+use pdf_to_text_wrapper::error::{Error, Result};
+use pdf_to_text_wrapper::process_pdf_to_text::PdfBackend;
+use pdf_to_text_wrapper::process_source::{
+    mapped_output, process_source_to_text, single_file_outputs,
+};
 use pdf_to_text_wrapper::process_text_to_token::{
     process_join_token, process_text_to_token, process_token_to_global,
 };
-use pdf_to_text_wrapper::error::{Error, Result};
 use pdf_to_text_wrapper::service::start_service;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use token_db::TokenDb;
 
 fn usage() {
     eprintln!("Usage:");
-    eprintln!("  pdf_to_text [grobid|mineru] <pdf_input_dir> <output_dir>");
+    eprintln!("  pdf_to_text [grobid|mineru] <input_dir|input_file> <output_dir>");
     eprintln!("  pdf_to_text start [grobid|mineru]");
+}
+
+/// Process one file without scanning other input files. The token database
+/// merge and global remapping stages remain shared with directory mode.
+fn process_single_file(
+    config: &Config,
+    backend: PdfBackend,
+    input: &Path,
+    output_root: &Path,
+) -> Result<()> {
+    let (text_output, token_output, db_output) = single_file_outputs(config, input, output_root)?;
+    std::fs::create_dir_all(output_root)?;
+    if fsscanner_mt::needs_update(input, &text_output).map_err(|_| Error::FsScanner)? {
+        process_source_to_text(config, backend, input, &text_output)?;
+    }
+    if fsscanner_mt::needs_update(&text_output, &token_output).map_err(|_| Error::FsScanner)?
+        || fsscanner_mt::needs_update(&text_output, &db_output).map_err(|_| Error::FsScanner)?
+    {
+        process_text_to_token(&text_output, &token_output, &db_output)?;
+    }
+    Ok(())
 }
 
 fn main() -> Result<()> {
@@ -46,57 +70,89 @@ fn main() -> Result<()> {
         std::process::exit(1);
     }
 
-    let (backend, pdf_input, output_root) = if args.len() == 4 {
+    let (backend, source_input, output_root) = if args.len() == 4 {
         (args[1].parse::<PdfBackend>()?, &args[2], &args[3])
     } else {
         (config.backend, &args[1], &args[2])
     };
 
-    //
-    // Stage 1: PDF -> text
-    //
-
-    let workers = match backend {
-        PdfBackend::Grobid => config.grobid.threads,
-        PdfBackend::Mineru => config.mineru.threads,
-    };
-
-    let worker_config = config.clone();
-    fsscanner_mt::process_dir_map_outdated_with_workers(
-        pdf_input,
-        output_root,
-        "pdf",
-        "md",
-        workers,
-        move |input, output| {
-            process_pdf_to_text(&worker_config, backend, input, output).map_err(|_| fsscanner::Error::Callback("PDF conversion failed"))
-        },
-    )
-    .map_err(|_| Error::FsScanner)?;
+    let single_file = Path::new(source_input).is_file();
+    if !single_file && !Path::new(source_input).is_dir() {
+        return Err(Error::InvalidPath(
+            "input must be an existing file or directory",
+        ));
+    }
+    let extensions = config.scan_extensions()?;
 
     //
-    // Stage 2: text -> per-document token stream + lookup database
+    // Stage 1: configured source -> text
     //
 
-    fsscanner_mt::process_dir_map_with_workers(
-        pdf_input,
-        output_root,
-        "pdf",
-        "tok",
-        1,
-        move |_pdf, token_output| {
-            let text_input = token_output.with_extension("md");
-            let db_output = token_output.with_extension("tdb");
-            if fsscanner_mt::needs_update(&text_input, token_output)?
-                || fsscanner_mt::needs_update(&text_input, &db_output)?
-            {
-                process_text_to_token(&text_input, token_output, &db_output)
-                    .map_err(|_| fsscanner::Error::Callback("token conversion failed"))?;
-            }
-            Ok(())
-        },
-    )
-    .map_err(|_| Error::FsScanner)?;
+    if single_file {
+        process_single_file(
+            &config,
+            backend,
+            Path::new(source_input),
+            Path::new(output_root),
+        )?;
+    } else {
+        let workers = match backend {
+            PdfBackend::Grobid => config.grobid.threads,
+            PdfBackend::Mineru => config.mineru.threads,
+        };
+
+        // fsscanner maps one extension at a time. Reuse it for every configured
+        // suffix rather than adding a separate directory walker or worker pool.
+        for extension in &extensions {
+            let worker_config = config.clone();
+            fsscanner_mt::process_dir_map_with_workers(
+                source_input,
+                output_root,
+                extension,
+                "md",
+                workers,
+                move |input, output| {
+                    let text_output = mapped_output(input, output, "md")
+                        .map_err(|_| fsscanner::Error::Callback("invalid document output path"))?;
+                    if fsscanner_mt::needs_update(input, &text_output)? {
+                        process_source_to_text(&worker_config, backend, input, &text_output)
+                            .map_err(|_| {
+                                fsscanner::Error::Callback("document conversion failed")
+                            })?;
+                    }
+                    Ok(())
+                },
+            )
+            .map_err(|_| Error::FsScanner)?;
+        }
+
+        //
+        // Stage 2: text -> per-document token stream + lookup database
+        //
+        for extension in &extensions {
+            fsscanner_mt::process_dir_map_with_workers(
+                source_input,
+                output_root,
+                extension,
+                "tok",
+                1,
+                move |source, mapped_token_output| {
+                    let token_output = mapped_output(source, mapped_token_output, "tok")
+                        .map_err(|_| fsscanner::Error::Callback("invalid token output path"))?;
+                    let text_input = token_output.with_extension("md");
+                    let db_output = token_output.with_extension("tdb");
+                    if fsscanner_mt::needs_update(&text_input, &token_output)?
+                        || fsscanner_mt::needs_update(&text_input, &db_output)?
+                    {
+                        process_text_to_token(&text_input, &token_output, &db_output)
+                            .map_err(|_| fsscanner::Error::Callback("token conversion failed"))?;
+                    }
+                    Ok(())
+                },
+            )
+            .map_err(|_| Error::FsScanner)?;
+        }
+    }
 
     //
     // Stage 3: per-document lookup databases -> merged corpus database
@@ -135,39 +191,32 @@ fn main() -> Result<()> {
     //
 
     let global_db = TokenDb::load(&token_db_output)?;
-    fsscanner_mt::process_dir_map_with_workers(
-        output_root,
-        output_root,
-        "tdb",
-        "unused",
-        1,
-        {
-            let token_db_output = token_db_output.clone();
-            move |local_db_input, _| {
-                if local_db_input == token_db_output {
-                    return Ok(());
-                }
-
-                let token_input = local_db_input.with_extension("tok");
-                let stem = local_db_input
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .ok_or(fsscanner::Error::Callback("invalid token database path"))?;
-                let global_token_output = local_db_input.with_file_name(format!("{stem}_glob.tok"));
-
-                if fsscanner_mt::needs_update(&token_db_output, &global_token_output)? {
-                    process_token_to_global(
-                        &token_input,
-                        local_db_input,
-                        &global_db,
-                        &global_token_output,
-                    )
-                    .map_err(|_| fsscanner::Error::Callback("global token remap failed"))?;
-                }
-                Ok(())
+    fsscanner_mt::process_dir_map_with_workers(output_root, output_root, "tdb", "unused", 1, {
+        let token_db_output = token_db_output.clone();
+        move |local_db_input, _| {
+            if local_db_input == token_db_output {
+                return Ok(());
             }
-        },
-    )
+
+            let token_input = local_db_input.with_extension("tok");
+            let stem = local_db_input
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .ok_or(fsscanner::Error::Callback("invalid token database path"))?;
+            let global_token_output = local_db_input.with_file_name(format!("{stem}_glob.tok"));
+
+            if fsscanner_mt::needs_update(&token_db_output, &global_token_output)? {
+                process_token_to_global(
+                    &token_input,
+                    local_db_input,
+                    &global_db,
+                    &global_token_output,
+                )
+                .map_err(|_| fsscanner::Error::Callback("global token remap failed"))?;
+            }
+            Ok(())
+        }
+    })
     .map_err(|_| Error::FsScanner)?;
 
     Ok(())

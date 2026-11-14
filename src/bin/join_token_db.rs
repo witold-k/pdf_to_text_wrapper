@@ -2,10 +2,10 @@
 // Copyright (c) 2026 Witold Kaminski
 
 use fsscanner::fsscanner_mt;
-use std::path::PathBuf;
-use token_db::TokenDb;
 use pdf_to_text_wrapper::error::{Error, Result};
 use pdf_to_text_wrapper::process_text_to_token::process_join_token;
+use std::path::PathBuf;
+use token_db::TokenDb;
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
@@ -36,7 +36,8 @@ fn main() -> Result<()> {
                     .map_err(|_| fsscanner::Error::Callback("token merge failed"))
             }
         },
-    ).map_err(|_| Error::FsScanner)?;
+    )
+    .map_err(|_| Error::FsScanner)?;
 
     db.save(output_db_file)?;
     Ok(())

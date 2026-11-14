@@ -15,7 +15,10 @@ fn test_dir(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
-    let path = std::env::temp_dir().join(format!("pdf_to_text_{name}_{}_{unique}", std::process::id()));
+    let path = std::env::temp_dir().join(format!(
+        "pdf_to_text_{name}_{}_{unique}",
+        std::process::id()
+    ));
     fs::create_dir_all(&path).unwrap();
     path
 }
@@ -67,11 +70,13 @@ fn process_writes_separate_token_stream_and_lookup_database() {
 }
 
 #[test]
-fn rejects_malformed_quoted_input() {
+fn tokenizes_unmatched_quotes_as_ordinary_tokens() {
     let mut db = TokenDb::new();
-    let error = tokenize(&mut db, "NAME = \"unterminated").unwrap_err();
+    let tokens = tokenize(&mut db, "NAME = \"unterminated").unwrap();
 
-    assert!(error.to_string().contains("unterminated quoted string"));
+    assert_eq!(tokens.len(), 4);
+    assert!(db.id("\"").is_some());
+    assert!(db.id("unterminated").is_some());
 }
 
 #[test]

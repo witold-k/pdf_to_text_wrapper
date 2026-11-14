@@ -195,7 +195,8 @@ impl GrobidConverter {
                     && n.tag_name().name() == "biblStruct"
             })
             .map(|n| Reference {
-                id: n.attribute(("http://www.w3.org/XML/1998/namespace", "id"))
+                id: n
+                    .attribute(("http://www.w3.org/XML/1998/namespace", "id"))
                     .map(str::to_string),
                 text: n.text().unwrap_or("").trim().to_string(),
             })

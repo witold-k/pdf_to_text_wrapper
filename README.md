@@ -1,6 +1,6 @@
 # pdf_to_text
 
-`pdf_to_text` is a small orchestration tool for preparing a local PDF corpus.
+`pdf_to_text` is a small orchestration tool for preparing a local document corpus.
 
 Its job is deliberately limited: connect existing components, map files between
 pipeline stages, and keep their outputs in a predictable layout. PDF extraction,
@@ -182,15 +182,53 @@ memory. The worker limit is passed to `fsscanner`; scheduling itself remains a
 Use the configured default backend:
 
 ```sh
-pdf_to_text <pdf_input_dir> <output_dir>
+pdf_to_text <input_dir> <output_dir>
 ```
 
 or select one explicitly:
 
 ```sh
-pdf_to_text mineru <pdf_input_dir> <output_dir>
-pdf_to_text grobid <pdf_input_dir> <output_dir>
+pdf_to_text mineru <input_dir> <output_dir>
+pdf_to_text grobid <input_dir> <output_dir>
 ```
+
+You can also pass a single input document without scanning its containing directory:
+
+```sh
+pdf_to_text /path/to/document.pdf /path/to/output
+pdf_to_text /path/to/document.docx /path/to/output
+pdf_to_text mineru /path/to/document.pdf /path/to/output
+```
+
+## Configured input suffixes
+
+Like `aiagents`, `pdf_to_text` uses a `scanendfilter` suffix list in
+`~/.config/pdf_to_text/config.json`. Its default is:
+
+```json
+{
+  "scanendfilter": [".pdf", ".docx"]
+}
+```
+
+Add text-based formats when required, for example `".md"`, `".txt"`,
+or `".xml"`. This list selects both individual files and files scanned
+recursively within input directories. Existing config files without this key
+receive the default suffixes when loaded. Suffixes must be simple extensions,
+including the leading dot.
+
+PDFs use the selected GROBID or MinerU backend. DOCX input uses its OOXML
+document body (via the system `unzip` command; install it if needed). All
+other configured formats are read as UTF-8 source text; enabling arbitrary
+binary extensions does not automatically provide a document decoder.
+
+Outputs for PDFs retain the existing paths (`document.md`, `document.tok`,
+`document.tdb`, `document_glob.tok`). To prevent collisions with the
+same-named PDF, other formats retain their source suffix in output names,
+for example `document.docx.md`, `document.docx.tok`,
+`document.docx.tdb`, and `document.docx_glob.tok`.
+The corpus-level `token_db.tdb` merges all documents already processed in
+the output directory, even when running on a single input file.
 
 Backend services can be started with:
 
@@ -208,8 +246,8 @@ just build
 The `build` recipe runs `cargo build`, `cargo test`, and `cargo clippy`, so it is
 the normal pre-merge check for this repository.
 
-Tests live under `tests/`, mirror the relevant `src/` hierarchy, and use the
-`_test.rs` suffix. For example, tests for `src/process_text_to_token.rs` belong
+All tests live under `tests/` (never under `src/`), mirror the relevant
+`src/` hierarchy, and use the `_test.rs` suffix. For example, tests for `src/process_text_to_token.rs` belong
 in `tests/process_text_to_token_test.rs`.
 
 ## Design direction

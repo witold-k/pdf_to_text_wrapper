@@ -40,14 +40,24 @@ impl fmt::Display for Error {
             Self::Http(error) => write!(f, "HTTP error: {error}"),
             Self::InvalidBackend => write!(f, "unknown PDF backend; expected 'grobid' or 'mineru'"),
             Self::InvalidPath(message) => write!(f, "invalid path: {message}"),
-            Self::InvalidTokenId(id) => write!(f, "token stream contains unknown local token ID {}", id.get()),
-            Self::MissingGlobalToken(token) => write!(f, "merged token database is missing token {token:?}"),
+            Self::InvalidTokenId(id) => write!(
+                f,
+                "token stream contains unknown local token ID {}",
+                id.get()
+            ),
+            Self::MissingGlobalToken(token) => {
+                write!(f, "merged token database is missing token {token:?}")
+            }
             Self::NoPrimaryArtifact => write!(f, "backend produced no primary artifact"),
-            Self::MultiplePrimaryArtifacts => write!(f, "backend produced multiple primary artifacts"),
+            Self::MultiplePrimaryArtifacts => {
+                write!(f, "backend produced multiple primary artifacts")
+            }
             Self::MineruFailed(status) => write!(f, "MinerU failed with status {status}"),
             Self::ServiceFailed(status) => write!(f, "service exited with status {status}"),
             Self::FsScanner => write!(f, "filesystem scanner failed"),
-            Self::UnsupportedPlatform => write!(f, "canonical output links are supported only on Unix"),
+            Self::UnsupportedPlatform => {
+                write!(f, "canonical output links are supported only on Unix")
+            }
         }
     }
 }
@@ -55,23 +65,37 @@ impl fmt::Display for Error {
 impl std::error::Error for Error {}
 
 impl From<io::Error> for Error {
-    fn from(error: io::Error) -> Self { Self::Io(error) }
+    fn from(error: io::Error) -> Self {
+        Self::Io(error)
+    }
 }
 impl From<serde_json::Error> for Error {
-    fn from(error: serde_json::Error) -> Self { Self::Json(error) }
+    fn from(error: serde_json::Error) -> Self {
+        Self::Json(error)
+    }
 }
 impl From<roxmltree::Error> for Error {
-    fn from(error: roxmltree::Error) -> Self { Self::Xml(error) }
+    fn from(error: roxmltree::Error) -> Self {
+        Self::Xml(error)
+    }
 }
 impl From<simplelexer::error::LexError> for Error {
-    fn from(error: simplelexer::error::LexError) -> Self { Self::Lex(error) }
+    fn from(error: simplelexer::error::LexError) -> Self {
+        Self::Lex(error)
+    }
 }
 impl From<token_db::Error> for Error {
-    fn from(error: token_db::Error) -> Self { Self::TokenDb(error) }
+    fn from(error: token_db::Error) -> Self {
+        Self::TokenDb(error)
+    }
 }
 impl From<postcard::Error> for Error {
-    fn from(error: postcard::Error) -> Self { Self::Postcard(error) }
+    fn from(error: postcard::Error) -> Self {
+        Self::Postcard(error)
+    }
 }
 impl From<ureq::Error> for Error {
-    fn from(error: ureq::Error) -> Self { Self::Http(error) }
+    fn from(error: ureq::Error) -> Self {
+        Self::Http(error)
+    }
 }
