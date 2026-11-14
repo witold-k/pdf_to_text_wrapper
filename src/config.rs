@@ -3,7 +3,7 @@
 
 use crate::error::Result;
 use serde::{Deserialize, Serialize};
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, path::{Path, PathBuf}};
 
 use crate::process_pdf_to_text::PdfBackend;
 
@@ -29,9 +29,16 @@ pub struct MineruConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Filename suffixes accepted by source scanning (as in aiagents).
+    #[serde(default = "default_scanendfilter")]
+    pub scanendfilter: Vec<String>,
     pub backend: PdfBackend,
     pub grobid: GrobidConfig,
     pub mineru: MineruConfig,
+}
+
+fn default_scanendfilter() -> Vec<String> {
+    vec![".pdf".into(), ".docx".into()]
 }
 
 impl Default for Config {
@@ -42,6 +49,7 @@ impl Default for Config {
             .join("opt/services");
 
         Self {
+            scanendfilter: default_scanendfilter(),
             backend: PdfBackend::Grobid,
             grobid: GrobidConfig {
                 source: "https://github.com/grobidOrg/grobid".into(),
@@ -72,6 +80,38 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Check a file name against configured suffixes, matching without case sensitivity.
+    pub fn accepts(&self, path: &Path) -> bool {
+        let name = path.file_name().and_then(|s| s.to_str());
+        name.is_some_and(|name| {
+            self.scanendfilter.iter().any(|suffix| {
+                !suffix.is_empty() && name.to_ascii_lowercase().ends_with(&suffix.to_ascii_lowercase())
+            })
+        })
+    }
+
+    /// Extensions used with fsscanner's single-extension scan operations.
+    /// Repeated extensions and dotted/undotted spellings are normalized.
+    pub fn scan_extensions(&self) -> Result<Vec<String>> {
+        let mut extensions = Vec::new();
+        for suffix in &self.scanendfilter {
+            let Some(extension) = suffix.strip_prefix('.') else {
+                return Err(crate::error::Error::InvalidPath("scanendfilter entries must start with '.'"));
+            };
+            if extension.is_empty() || extension.contains('.') || extension.contains('/') || extension.contains('\\') {
+                return Err(crate::error::Error::InvalidPath("scanendfilter must contain simple file extensions"));
+            }
+            let extension = extension.to_ascii_lowercase();
+            if !extensions.contains(&extension) {
+                extensions.push(extension);
+            }
+        }
+        if extensions.is_empty() {
+            return Err(crate::error::Error::InvalidPath("scanendfilter must not be empty"));
+        }
+        Ok(extensions)
+    }
+
     pub fn load(path: &std::path::Path) -> Result<Self> {
         let content = fs::read_to_string(path)?;
         Ok(serde_json::from_str(&content)?)
